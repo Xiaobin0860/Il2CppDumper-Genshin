@@ -183,6 +183,7 @@ namespace Il2CppDumper
 
         public ulong FindGenshinAddress()
         {
+            ulong gaddr = 0;
             foreach (var section in data)
             {
                 il2Cpp.Position = section.offset;
@@ -193,21 +194,25 @@ namespace Il2CppDumper
                     {
                         try
                         {
+                            gaddr = addr - il2Cpp.PointerSize * 6 - section.offset + section.address;
                             var pointer = il2Cpp.MapVATR(il2Cpp.ReadUIntPtr());
+                            Console.WriteLine("GenshinAddress try 0x{0:X} 0x{1:X}, pointer=0x{2:X}", addr, gaddr, pointer);
                             if (CheckPointerRangeDataRa(pointer))
                             {
-                                return addr - il2Cpp.PointerSize * 6 - section.offset + section.address;
+                                return gaddr;
                             }
                         }
                         catch
                         {
                             // ignored
+                            Console.WriteLine("catch exception");
                         }
                     }
                     il2Cpp.Position = addr + il2Cpp.PointerSize;
                 }
             }
-            return 0ul;
+            Console.WriteLine("Use Last UsageVA 0x{0:X}", gaddr);
+            return gaddr;
         }
 
         private ulong FindCodeRegistrationOld()

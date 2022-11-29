@@ -266,7 +266,9 @@ namespace Il2CppDumper
             if (Program.IsGenshinMetadata)
             {
                 var sectionHelper = executor.GetSectionHelper();
-                il2Cpp.Position = il2Cpp.MapVATR(sectionHelper.FindGenshinAddress());
+                var mihoyoUsageVA = sectionHelper.FindGenshinAddress();
+                Console.WriteLine("mihoyoUsageVA : 0x{0:X}", mihoyoUsageVA);
+                il2Cpp.Position = il2Cpp.MapVATR(mihoyoUsageVA);
                 il2Cpp.Position += il2Cpp.PointerSize;
                 ulong typeInfoAddress = il2Cpp.ReadUIntPtr();
                 il2Cpp.Position += il2Cpp.PointerSize;

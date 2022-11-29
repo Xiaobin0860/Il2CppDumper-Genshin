@@ -94,8 +94,8 @@ namespace Il2CppDumper
                     }
                 }
             }
-            Console.WriteLine("CodeRegistration : {0:x}", codeRegistration);
-            Console.WriteLine("MetadataRegistration : {0:x}", metadataRegistration);
+            Console.WriteLine("CodeRegistration : 0x{0:X}", codeRegistration);
+            Console.WriteLine("MetadataRegistration : 0x{0:X}", metadataRegistration);
             if (codeRegistration != 0 && metadataRegistration != 0)
             {
                 Init(codeRegistration, metadataRegistration);

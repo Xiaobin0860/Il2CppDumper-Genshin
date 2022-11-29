@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
+using System.Diagnostics;
 #if NETFRAMEWORK
 using System.Windows.Forms;
 #endif
@@ -22,6 +23,7 @@ namespace Il2CppDumper
             config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(AppDomain.CurrentDomain.BaseDirectory + @"config.json"));
             string il2cppPath = null;
             string metadataPath = null;
+            string playerPath = null;
             string outputDir = null;
 
             if (args.Length == 1)
@@ -74,6 +76,15 @@ namespace Il2CppDumper
                     if (ofd.ShowDialog() == DialogResult.OK)
                     {
                         metadataPath = ofd.FileName;
+                        ofd.Filter = "UnityPlayer Dll|UnityPlayer.dll";
+                        if (ofd.ShowDialog() == DialogResult.OK)
+                        {
+                            playerPath = ofd.FileName;
+                        }
+                        else
+                        {
+                            return;
+                        }
                     }
                     else
                     {
@@ -99,7 +110,7 @@ namespace Il2CppDumper
             {
                 try
                 {
-                    if (Init(il2cppPath, metadataPath, out var metadata, out var il2Cpp))
+                    if (Init(il2cppPath, metadataPath, playerPath, out var metadata, out var il2Cpp))
                     {
                         Dump(metadata, il2Cpp, outputDir);
                     }
@@ -121,16 +132,50 @@ namespace Il2CppDumper
             Console.WriteLine($"usage: {AppDomain.CurrentDomain.FriendlyName} <executable-file> <global-metadata> <output-directory>");
         }
 
-        private static bool Init(string il2cppPath, string metadataPath, out Metadata metadata, out Il2Cpp il2Cpp)
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private extern static IntPtr LoadLibrary(string path);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr DecryptMetadata(byte[] bytes, int length);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr GetStringFromIndex(byte[] bytes, uint index);
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate IntPtr GetStringLiteralFromIndex(byte[] bytes, uint index, ref int length);
+
+        private static bool Init(string il2cppPath, string metadataPath, string playerPath, out Metadata metadata, out Il2Cpp il2Cpp)
         {
             Console.WriteLine("Initializing metadata...");
             var metadataBytes = File.ReadAllBytes(metadataPath);
+            var len = metadataBytes.Length;
 
+            // Try to load UnityPlayer.dll
+            var hModule = LoadLibrary(playerPath);
+            if (hModule == IntPtr.Zero)
+                throw new FileLoadException("Could not load UnityPlayer DLL", playerPath);
+            // Get the base address of the loaded DLL in memory
+            var ModuleBase = Process.GetCurrentProcess().Modules.Cast<ProcessModule>().First(m => m.ModuleName == Path.GetFileName(playerPath)).BaseAddress;
+            // Create a delegate which internally is a function pointer to the DecryptMetadata function in the DLL
+            var pDecryptMetadata = (DecryptMetadata)Marshal.GetDelegateForFunctionPointer(ModuleBase + 0x17AF50, typeof(DecryptMetadata));
+            var decryptedBytesUnmanaged = pDecryptMetadata(metadataBytes, len);
+            var metadataBlob = new byte[len];
+            Marshal.Copy(decryptedBytesUnmanaged, metadataBlob, 0, len);
+            var xo_key = new byte[] { 0xAD, 0x2F, 0x42, 0x30, 0x67, 0x04, 0xB0, 0x9C, 0x9D, 0x2A, 0xC0, 0xBA, 0x0E, 0xBF, 0xA5, 0x68 };
+            // The step is based on the file size
+            var step = (int)(len >> 14) << 6;
+            for (var pos = 0; pos < metadataBlob.Length; pos += step)
+                for (var b = 0; b < 0x10; b++)
+                    metadataBlob[pos + b] ^= xo_key[b];
+            File.WriteAllBytes("mdec1.dat", metadataBlob);
+
+            metadataBytes = File.ReadAllBytes(metadataPath);
             var lastBlockPointer = metadataBytes.Length - 0x4008;
             IsGenshinMetadata = BitConverter.ToInt64(metadataBytes, lastBlockPointer) == lastBlockPointer;
             if (!IsGenshinMetadata)throw new NotSupportedException("ERROR: It not genshin's metadata!");           
             Console.WriteLine("It genshin's metadata!");
             metadataBytes = Decrypter.decrypt_global_metadata(metadataBytes, metadataBytes.Length);
+            File.WriteAllBytes("mdec2.dat", metadataBytes);
 
             metadata = new Metadata(new MemoryStream(metadataBytes));
             Console.WriteLine($"Metadata Version: {metadata.Version}");
